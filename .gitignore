@@ -13,3 +13,4 @@ etc/
 .DS_Store
 Thumbs.db
 *.nix
+.direnv
