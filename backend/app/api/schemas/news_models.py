@@ -1,6 +1,15 @@
-# app/api/schemas/news_models.py
-from pydantic import BaseModel
-from typing import List, Dict
+from typing import Dict
+
+from pydantic import BaseModel, Field
+
+
+class NewsDocumentIngest(BaseModel):
+    title: str
+    url: str
+    content: str
+    source: str
+    keywords: list[str] = Field(default_factory=list)
+
 
 class ArticleSchema(BaseModel):
     title: str
@@ -10,8 +19,9 @@ class ArticleSchema(BaseModel):
     category: str
     url: str
 
+
 class NewsResponseSchema(BaseModel):
     status: str
     requested_category: str
     count: int
-    articles: Dict[str, ArticleSchema] # Matches your 1-to-20 custom numbering system!
+    articles: Dict[str, ArticleSchema]
