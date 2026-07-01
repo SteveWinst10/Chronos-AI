@@ -5,9 +5,11 @@
 .env.test.local
 .env.production.local
 *.env
+.envrc
 
 # Configuration and OS-specific files
 .etc/
 etc/
 .DS_Store
 Thumbs.db
+*.nix
