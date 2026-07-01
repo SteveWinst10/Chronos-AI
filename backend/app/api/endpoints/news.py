@@ -1,7 +1,6 @@
 # api/endpoints/news.py
 from fastapi import APIRouter, HTTPException, Query
-from services.news_pipeline import get_cleaned_news_stream
-
+from app.services.news.news_pipeline import get_cleaned_news_stream
 router = APIRouter()
 
 @router.get("/news")
