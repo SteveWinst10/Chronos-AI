@@ -28,4 +28,4 @@ async def get_news_by_category(
             "articles": numbered_articles  # Returns the 1-to-20 dictionary structure
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))git 
+        raise HTTPException(status_code=500, detail=str(e))
