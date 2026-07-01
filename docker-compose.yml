@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  # 🔵 Person 3's Knowledge Graph Database Engine
+  neo4j:
+    image: neo4j:5.20.0-community
+    container_name: chronos_neo4j_graph
+    ports:
+      - "7474:7474" # The web dashboard door (http://localhost:7474)
+      - "7687:7687" # The bolt connector door (where Python sends data)
+    environment:
+      - NEO4J_AUTH=neo4j/password # Matches your fallback settings!
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+
+# Create persistent storage shelves so your news data isn't wiped out 
+# when you turn off the Docker containers.
+volumes:
+  neo4j_data:
+  neo4j_logs:
