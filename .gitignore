@@ -1,0 +1,13 @@
+# Environment files (contains sensitive API keys, passwords, etc.)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Configuration and OS-specific files
+.etc/
+etc/
+.DS_Store
+Thumbs.db
