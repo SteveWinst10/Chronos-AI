@@ -4,6 +4,7 @@ import ChatPage from "./pages/chat.jsx";
 import DashboardPage from "./pages/dashboard.jsx";
 import MemoryExplorer from "./pages/memory_explorer.jsx";
 import TimelinePage from "./pages/timeline.jsx";
+import SettingsPage from "./pages/settings.jsx";
 import useStore from "./store/global_store.js";
 
 export default function App() {
@@ -18,8 +19,10 @@ export default function App() {
           {currentPage === "dashboard" && <DashboardPage />}
           {currentPage === "memory_explorer" && <MemoryExplorer />}
           {currentPage === "timeline" && <TimelinePage />}
+          {currentPage === "settings" && <SettingsPage />}
         </main>
       </div>
     </div>
   );
 }
+
