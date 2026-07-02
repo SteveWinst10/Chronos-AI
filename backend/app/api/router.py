@@ -13,11 +13,10 @@ from app.api.endpoints.timeline import router as timeline_router
 api_router = APIRouter()
 
 # Include routers under versioned prefix
-api_router.include_router(news_router, prefix="/v1/news", tags=["News"])
-api_router.include_router(health_router, prefix="/v1", tags=["Health"])
-# Uncomment and include other routers when implemented
-api_router.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
-api_router.include_router(graph_router, prefix="/v1/graph", tags=["Graph"])
-api_router.include_router(memory_router, prefix="/v1/memory", tags=["Memory"])
-api_router.include_router(stories_router, prefix="/v1/stories", tags=["Stories"])
-api_router.include_router(timeline_router, prefix="/v1/timeline", tags=["Timeline"])
+api_router.include_router(news_router, prefix="/news", tags=["News"])
+api_router.include_router(health_router, prefix="", tags=["Health"])
+api_router.include_router(chat_router, prefix="/chat", tags=["Chat"])
+api_router.include_router(graph_router, prefix="/graph", tags=["Graph"])
+api_router.include_router(memory_router, prefix="/memory", tags=["Memory"])
+api_router.include_router(stories_router, prefix="/stories", tags=["Stories"])
+api_router.include_router(timeline_router, prefix="/timeline", tags=["Timeline"])

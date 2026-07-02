@@ -72,5 +72,24 @@ def get_cleaned_news_stream(category="technology"):
         if title_lower not in seen_titles:
             seen_titles.add(title_lower)
             cleaned_articles.append(processed)
-            
     return cleaned_articles
+
+
+
+class NewsIntelligencePipeline:
+    """
+    OOP wrapper around the functional news pipeline.
+    Provides a class-based interface used by the API endpoints and audit scripts.
+    """
+
+    def __init__(self, category: str = "technology"):
+        self.category = category
+
+    def fetch(self) -> list[dict]:
+        """Fetch and clean the latest news articles for the configured category."""
+        return get_cleaned_news_stream(category=self.category)
+
+    def run(self, category: str | None = None) -> list[dict]:
+        """Run the full pipeline. Optionally override the category."""
+        target = category or self.category
+        return get_cleaned_news_stream(category=target)

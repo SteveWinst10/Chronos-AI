@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.get("/graph")
+@router.get("/")
 async def graph_snapshot():
     """Placeholder graph endpoint returning static nodes and edges."""
     return {

@@ -356,3 +356,8 @@ class Neo4jGraphStore:
 
 # Create single global instance
 neo4j_graph = Neo4jGraphStore()
+
+
+def fetch_graph_network(node_name: str) -> list[dict]:
+    """Module-level alias for neo4j_graph.get_neighborhood — used by audit scripts and endpoints."""
+    return neo4j_graph.get_neighborhood(node_name)
