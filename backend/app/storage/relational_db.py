@@ -1,5 +1,7 @@
+import datetime
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -30,6 +32,25 @@ AsyncSessionLocal = async_sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+
+# =====================================================================
+# ADDED FOR PERSON 2 MILESTONE: News Database Table Schema
+# =====================================================================
+class ArticleRecord(Base):
+    """
+    Relational DB table schema to store historical indexes of raw 
+    processed news metadata records mapped from the news pipeline.
+    """
+    __tablename__ = "news_articles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    description = Column(Text, nullable=True)
+    source = Column(String, index=True)
+    category = Column(String, index=True)
+    url = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
