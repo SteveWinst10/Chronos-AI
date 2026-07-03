@@ -1,9 +1,5 @@
-    # app/api/schemas/news_models.py
 from pydantic import BaseModel, Field
 from typing import Dict
-from typing import Dict
-
-from pydantic import BaseModel, Field
 
 
 class NewsDocumentIngest(BaseModel):
@@ -32,4 +28,4 @@ class NewsResponseSchema(BaseModel):
     status: str
     requested_category: str
     count: int
-    articles: Dict[str, ArticleSchema]
+    articles: Dict[str, ArticleModel]
