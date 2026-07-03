@@ -1,17 +1,17 @@
-# app/api/schemas/news_models.py
-from pydantic import BaseModel
-from typing import List, Dict
+    # app/api/schemas/news_models.py
+from pydantic import BaseModel, Field
+from typing import Dict
 
-class ArticleSchema(BaseModel):
-    title: str
-    description: str
-    date: str
-    source: str
-    category: str
-    url: str
+class ArticleModel(BaseModel):
+    title: str = Field(..., description="The cleaned title of the news article")
+    description: str = Field(..., description="The sanitized description summary")
+    date: str = Field(..., description="Standardized date timestamp (YYYY-MM-DD HH:MM)")
+    source: str = Field(..., description="The publisher or news origin source")
+    category: str = Field(..., description="The dynamic category requested")
+    url: str = Field(..., description="The direct web URL address")
 
-class NewsResponseSchema(BaseModel):
+class NewsResponseModel(BaseModel):
     status: str
     requested_category: str
     count: int
-    articles: Dict[str, ArticleSchema] # Matches your 1-to-20 custom numbering system!
+    articles: Dict[str, ArticleModel]  # Matches your custom 1-to-20 indexing
