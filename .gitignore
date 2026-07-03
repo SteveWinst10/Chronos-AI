@@ -5,9 +5,20 @@
 .env.test.local
 .env.production.local
 *.env
+.envrc
 
 # Configuration and OS-specific files
 .etc/
 etc/
 .DS_Store
 Thumbs.db
+*.nix
+.direnv
+.venv/
+.idea/
+__pycache__/
+*.py[cod]
+frontend/node_modules/
+frontend/package-lock.json
+backend/memories.lance/
+frontend/dist/

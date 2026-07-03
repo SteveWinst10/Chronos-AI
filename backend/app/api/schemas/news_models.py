@@ -1,6 +1,18 @@
     # app/api/schemas/news_models.py
 from pydantic import BaseModel, Field
 from typing import Dict
+from typing import Dict
+
+from pydantic import BaseModel, Field
+
+
+class NewsDocumentIngest(BaseModel):
+    title: str
+    url: str
+    content: str
+    source: str
+    keywords: list[str] = Field(default_factory=list)
+
 
 class ArticleModel(BaseModel):
     title: str = Field(..., description="The cleaned title of the news article")
@@ -15,3 +27,9 @@ class NewsResponseModel(BaseModel):
     requested_category: str
     count: int
     articles: Dict[str, ArticleModel]  # Matches your custom 1-to-20 indexing
+
+class NewsResponseSchema(BaseModel):
+    status: str
+    requested_category: str
+    count: int
+    articles: Dict[str, ArticleSchema]

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.news.news_pipeline import get_cleaned_news_stream
 router = APIRouter()
 
-@router.get("/news")
+@router.get("/")
 async def get_news_by_category(
     category: str = Query(default="technology", description="Category of news to fetch")
 ):
@@ -29,4 +29,4 @@ async def get_news_by_category(
             "articles": numbered_articles  # Returns the 1-to-20 dictionary structure
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))git 
+        raise HTTPException(status_code=500, detail=str(e))
