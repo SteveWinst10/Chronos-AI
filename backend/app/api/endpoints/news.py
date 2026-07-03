@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.news.news_pipeline import get_cleaned_news_stream
 router = APIRouter()
 
-@router.get("/news/", response_model=NewsResponseModel)
+@router.get("/", response_model=NewsResponseModel)
 async def get_news_by_category(
     category: str = Query(default="technology", description="Category of news to fetch")
 ):
