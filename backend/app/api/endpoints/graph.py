@@ -1,16 +1,14 @@
 from fastapi import APIRouter
+from app.storage.neo4j_graph import neo4j_graph
 
 router = APIRouter()
 
 @router.get("/")
 async def graph_snapshot():
-    """Placeholder graph endpoint returning static nodes and edges."""
+    """Returns actual Neo4j graph nodes and edges."""
+    nodes = neo4j_graph.get_all_nodes()
+    edges = neo4j_graph.get_all_edges()
     return {
-        "nodes": [
-            {"id": 1, "label": "Node1"},
-            {"id": 2, "label": "Node2"}
-        ],
-        "edges": [
-            {"source": 1, "target": 2, "type": "directed"}
-        ]
+        "nodes": nodes,
+        "edges": edges
     }

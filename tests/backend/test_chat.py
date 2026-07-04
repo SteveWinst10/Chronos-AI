@@ -58,3 +58,25 @@ def test_memory_set_and_get():
     # Confirm gone
     resp = client.get("/api/v1/memory/testkey")
     assert resp.status_code == 404
+
+
+def test_cognee_memory_endpoints():
+    # 1. Fetch graph snapshot
+    resp = client.get("/api/v1/graph/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "nodes" in data
+    assert "edges" in data
+
+    # 2. Fetch vector memories
+    resp = client.get("/api/v1/memory/vector")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "memories" in data
+    assert isinstance(data["memories"], list)
+
+    # 3. Purge Cognee memory node/vector
+    resp = client.delete("/api/v1/memory/cognee/TestNode")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+    assert resp.json()["purged"] == "TestNode"
