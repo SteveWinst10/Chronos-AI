@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/")
+async def get_chat_history():
+    """Returns initial/history chat messages for testing or default view."""
+    return {
+        "messages": [
+            {"role": "assistant", "content": "Hello! I am Chronos AI. How can I help you today?"}
+        ]
+    }
+
+
 @router.post("/", response_model=ChatResponse)
 async def process_chat_message(payload: ChatRequest):
     try:
