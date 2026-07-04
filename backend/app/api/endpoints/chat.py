@@ -1,6 +1,8 @@
 import logging
+import json
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.api.schemas.chat_models import ChatRequest, ChatResponse
 from app.services.cognee.memory_manager import CogneeMemoryManager
@@ -49,6 +51,48 @@ async def process_chat_message(payload: ChatRequest):
         raise
     except Exception as e:
         logger.exception("Chat processing failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stream")
+async def process_chat_stream(payload: ChatRequest):
+    try:
+        user_message = payload.message.strip()
+        if not user_message:
+            raise HTTPException(status_code=400, detail="Message content cannot be blank.")
+
+        conversation_id = _derive_conversation_id(payload)
+
+        # 1. Ingest user message to memory
+        await CogneeMemoryManager.remember_context(user_message, conversation_id)
+
+        # 2. Recall context
+        recall_data = await CogneeMemoryManager.recall_context(user_message)
+        context = build_context(user_message, recall_data)
+
+        # 3. Stream from LLM
+        async def event_generator():
+            llm = LLMClient()
+            full_response_parts = []
+            try:
+                async for chunk in llm.generate_stream(context, CONTEXT_ENGINE_PROMPT):
+                    full_response_parts.append(chunk)
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+                # Once streaming is done, remember the full assistant response
+                full_response = "".join(full_response_parts)
+                if full_response:
+                    await CogneeMemoryManager.remember_context(full_response, conversation_id)
+            except Exception as ex:
+                logger.exception("Error in chat stream event generator")
+                yield f"data: {json.dumps({'error': str(ex)})}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Streaming chat setup failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
