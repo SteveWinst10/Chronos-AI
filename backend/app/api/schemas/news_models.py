@@ -1,4 +1,3 @@
-    # app/api/schemas/news_models.py
 from pydantic import BaseModel, Field
 from typing import Dict
 
