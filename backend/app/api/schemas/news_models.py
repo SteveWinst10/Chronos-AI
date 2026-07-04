@@ -1,9 +1,8 @@
     # app/api/schemas/news_models.py
 from pydantic import BaseModel, Field
 from typing import Dict
-from typing import Dict
 
-from pydantic import BaseModel, Field
+
 
 
 class NewsDocumentIngest(BaseModel):
@@ -28,8 +27,4 @@ class NewsResponseModel(BaseModel):
     count: int
     articles: Dict[str, ArticleModel]  # Matches your custom 1-to-20 indexing
 
-class NewsResponseSchema(BaseModel):
-    status: str
-    requested_category: str
-    count: int
-    articles: Dict[str, ArticleSchema]
+
