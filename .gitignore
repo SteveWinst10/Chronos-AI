@@ -21,4 +21,5 @@ __pycache__/
 frontend/node_modules/
 frontend/package-lock.json
 backend/memories.lance/
+memories.lance/
 frontend/dist/
