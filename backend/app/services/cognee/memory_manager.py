@@ -28,6 +28,7 @@ from app.services.cognee.remember import RememberArticleResult, remember_article
 from app.services.cognee.forget import purge_node_memory
 from app.services.llm.llm_client import LLMClient
 from app.services.retrieval.context_builder import build_context_prompt, get_system_prompt
+from app.storage.neo4j_graph import neo4j_graph
 
 # Phase 5 & 6 Imports
 from app.services.analytics.improvement_service import ImprovementService
@@ -322,3 +323,55 @@ class MemoryManager:
             status="success" if success else "failed",
         )
         return success
+
+
+class CogneeMemoryManager:
+    """Legacy static facade kept for older scripts and tests.
+
+    New code should instantiate ``MemoryManager`` directly.
+    """
+
+    @staticmethod
+    async def remember_context(text: str, conversation_id: str | None = None) -> dict[str, Any]:
+        """Store ad-hoc context in the graph fallback as a conversation node."""
+        node_name = conversation_id or f"context-{int(time.time() * 1000)}"
+        neo4j_graph.upsert_node(
+            node_name,
+            "CONVERSATION",
+            {
+                "text": text,
+                "conversation_id": conversation_id,
+            },
+        )
+        return {"status": "success", "conversation_id": conversation_id, "text": text}
+
+    @staticmethod
+    async def recall_context(query: str, limit: int = 5) -> dict[str, Any]:
+        """Return semantic and relational memories in the pre-refactor shape."""
+        semantic_memories: list[dict[str, Any]] = []
+        try:
+            memories = await recall_memories(query, limit=limit)
+            semantic_memories = [
+                {
+                    "title": memory.title,
+                    "content": memory.content,
+                    "source": memory.source,
+                    "link": memory.link,
+                    "score": memory.score,
+                    "metadata": memory.metadata,
+                }
+                for memory in memories
+            ]
+        except Exception as exc:
+            logger.debug("Legacy recall_context semantic recall skipped: %s", exc)
+
+        relational_memories = neo4j_graph.get_all_edges()[:limit]
+        return {
+            "semantic_memories": semantic_memories,
+            "relational_memories": relational_memories,
+        }
+
+    @staticmethod
+    async def purge_node_memory(entity_id: str) -> bool:
+        """Legacy wrapper around the current forget implementation."""
+        return await purge_node_memory(entity_id)

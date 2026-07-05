@@ -168,7 +168,10 @@ def test_router():
     print("\n[API ROUTER]")
     try:
         from app.api.router import api_router
-        routes = [r.path for r in api_router.routes]
+        routes = [
+            getattr(r, "path", getattr(r, "prefix", type(r).__name__))
+            for r in api_router.routes
+        ]
         check("api_router loads", True, f"{len(routes)} routes")
     except Exception as e:
         check("api_router loads", False, str(e)[:80])

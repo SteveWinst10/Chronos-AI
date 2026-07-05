@@ -6,8 +6,14 @@ from fastapi import APIRouter, HTTPException
 
 from app.services.analytics.timeline import TimelineBuilder
 
-router = APIRouter(prefix="/timeline", tags=["Timeline"])
+router = APIRouter(tags=["Timeline"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/")
+async def list_timeline():
+    """Return an empty default timeline when no topic is supplied."""
+    return {"timeline": []}
 
 @router.get("/{topic}")
 async def get_timeline(topic: str):

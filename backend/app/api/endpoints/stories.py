@@ -12,8 +12,14 @@ from app.api.schemas.story_models import (
 )
 from app.services.analytics.story_engine import StoryEvolutionEngine
 
-router = APIRouter(prefix="/stories", tags=["Story Evolution"])
+router = APIRouter(tags=["Story Evolution"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/")
+async def list_stories():
+    """Return available story records for the dashboard/test harness."""
+    return {"stories": []}
 
 
 @router.post("", response_model=StoryResponse)

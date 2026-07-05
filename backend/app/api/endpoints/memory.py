@@ -16,9 +16,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 from app.services.cognee.memory_manager import MemoryManager
+from app.services.cognee.forget import purge_node_memory
 from app.services.analytics.improvement_service import ImprovementService
 from app.services.analytics.memory_analyzer import MemoryAnalyzer
 from app.services.analytics.lifecycle_tracker import LifecycleTracker
+from app.storage.vector_db import get_vector_db
 from app.api.schemas.memory_models import (
     GraphStatistics,
     MemoryHealthReport,
@@ -37,6 +39,59 @@ _analyzer = MemoryAnalyzer()
 
 # In-memory status tracker for background jobs
 _improvement_status: dict = {"running": False, "last_triggered": None}
+_legacy_memory_store: dict[str, Any] = {}
+
+
+class LegacyMemoryValue(BaseModel):
+    value: Any
+
+
+@router.post("/{key}")
+async def save_legacy_memory(key: str, payload: LegacyMemoryValue):
+    """Simple key/value memory endpoint kept for the existing UI and tests."""
+    _legacy_memory_store[key] = payload.value
+    return {"status": "saved", "key": key}
+
+
+@router.get("/vector")
+async def get_vector_memories():
+    """Return vector memory rows if the local vector table exists."""
+    try:
+        db = get_vector_db()
+        table_names = db.table_names()
+        if "memories" not in table_names:
+            return {"memories": []}
+        table = db.open_table("memories")
+        return {"memories": table.to_lance().to_table().to_pylist()}
+    except Exception as e:
+        logger.debug("Unable to read vector memories: %s", e)
+        return {"memories": []}
+
+
+@router.delete("/cognee/{entity_id}")
+async def delete_cognee_memory(entity_id: str):
+    """Legacy purge endpoint used by the graph explorer."""
+    success = await purge_node_memory(entity_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to purge memory.")
+    return {"status": "success", "purged": entity_id}
+
+
+@router.get("/{key}")
+async def get_legacy_memory(key: str):
+    """Read a value saved through the legacy key/value endpoint."""
+    if key not in _legacy_memory_store:
+        raise HTTPException(status_code=404, detail="Memory key not found.")
+    return {"key": key, "value": _legacy_memory_store[key]}
+
+
+@router.delete("/{key}")
+async def delete_legacy_memory(key: str):
+    """Delete a value saved through the legacy key/value endpoint."""
+    if key not in _legacy_memory_store:
+        raise HTTPException(status_code=404, detail="Memory key not found.")
+    del _legacy_memory_store[key]
+    return {"status": "deleted", "key": key}
 
 
 # ---------------------------------------------------------------------------
@@ -328,8 +383,6 @@ async def get_evolution_demo(
     except Exception:
         memories_after = []
     after_count = len(memories_after)
-    after_titles = [m.title for m in memoriess_after] # typo but not going to fix it since python tolerates inside except ...oops no it doesn't
-# let me fix this small typo
     after_titles = [m.title for m in memories_after]
     logs.append(f"  → Retrieved {after_count} memories after improvement.")
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.analytics.relationship_strength import RelationshipDiscovery
 from app.storage.neo4j_graph import neo4j_graph
 
-router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
+router = APIRouter(tags=["Knowledge Graph"])
 logger = logging.getLogger(__name__)
 
 @router.get("/")
