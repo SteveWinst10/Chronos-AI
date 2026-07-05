@@ -39,6 +39,7 @@ async def recall_context(user_query: str, limit: int = 5) -> dict:
             })
     except Exception as e:
         logger.error(f"Semantic recall failed: {e}")
+        semantic_results = []
 
     # Combine text from query and retrieved snippets to scan for entity mentions
     combined_scan_text = user_query.lower() + " " + " ".join([m["text"].lower() for m in semantic_results])
