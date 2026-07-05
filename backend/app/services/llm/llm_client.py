@@ -18,11 +18,17 @@ class LLMClient:
             # We initialize the client with a dummy string if no real key is set to prevent errors on init
             self.client = AsyncOpenAI(api_key="dummy-key")
             self.has_valid_key = False
+            self.model = "gpt-4o-mini"
+            self.is_groq = False
         else:
-            self.client = AsyncOpenAI(api_key=self.api_key)
+            self.is_groq = self.api_key.startswith("gsk_")
+            if self.is_groq:
+                self.client = AsyncOpenAI(api_key=self.api_key, base_url="https://api.groq.com/openai/v1")
+                self.model = "llama-3.1-8b-instant"
+            else:
+                self.client = AsyncOpenAI(api_key=self.api_key)
+                self.model = "gpt-4o-mini"
             self.has_valid_key = True
-            
-        self.model = "gpt-4o-mini"
 
     async def generate_stream(self, prompt: str, system_prompt: str) -> AsyncIterator[str]:
         """Stream chunks of response from the LLM."""
@@ -78,7 +84,7 @@ class LLMClient:
     async def get_embedding(self, text: str) -> list[float]:
         """Generate a dense vector representation of the text. Falls back to deterministic mock if no key is set."""
         dim = 1536
-        if not self.has_valid_key:
+        if not self.has_valid_key or self.is_groq:
             return self._generate_deterministic_mock_embedding(text, dim)
 
         try:

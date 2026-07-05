@@ -5,7 +5,7 @@ Sole responsibility: orchestrate the retrieval pipeline by coordinating
 
 Rules
 -----
-- No Cognee imports.
+- No Cognee imports (except where wrapped in specific methods).
 - No prompt-building logic.
 - No retrieval logic.
 - Delegates every concern to the appropriate module.
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Iterable, Mapping
-
+import time
+from typing import Any, Iterable, Mapping, Optional
 
 from app.services.cognee.recall import (
     MemoryItem,
@@ -25,12 +25,14 @@ from app.services.cognee.recall import (
     recall_memories,
 )
 from app.services.cognee.remember import RememberArticleResult, remember_article
+from app.services.cognee.forget import purge_node_memory
 from app.services.llm.llm_client import LLMClient
 from app.services.retrieval.context_builder import build_context_prompt, get_system_prompt
 
-# Phase 5 Imports
+# Phase 5 & 6 Imports
 from app.services.analytics.improvement_service import ImprovementService
 from app.services.analytics.memory_analyzer import MemoryAnalyzer
+from app.services.analytics.lifecycle_tracker import LifecycleTracker, EventType
 from app.api.schemas.memory_models import MemoryHealthReport, ImprovementReport, GraphStatistics
 
 logger = logging.getLogger(__name__)
@@ -54,9 +56,10 @@ class AskResult:
                        included in the context prompt.
         memory_trace:  Detailed list of retrieved memory metadata for
                        hackathon judges — proves the answer came from Cognee.
+        debug_trace:   Full intermediate pipeline state for demonstration/debugging.
     """
 
-    __slots__ = ("answer", "sources", "memories_used", "memory_trace")
+    __slots__ = ("answer", "sources", "memories_used", "memory_trace", "debug_trace")
 
     def __init__(
         self,
@@ -64,19 +67,24 @@ class AskResult:
         sources: list[dict[str, str]],
         memories_used: int,
         memory_trace: list[dict[str, Any]],
+        debug_trace: Optional[dict[str, Any]] = None,
     ) -> None:
         self.answer = answer
         self.sources = sources
         self.memories_used = memories_used
         self.memory_trace = memory_trace
+        self.debug_trace = debug_trace
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "answer": self.answer,
             "sources": self.sources,
             "memories_used": self.memories_used,
             "memory_trace": self.memory_trace,
         }
+        if self.debug_trace is not None:
+            d["debug_trace"] = self.debug_trace
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -147,18 +155,22 @@ class MemoryManager:
     # ------------------------------------------------------------------
 
     async def remember_article(self, article: Mapping[str, Any]) -> RememberArticleResult:
-        """Store one parsed news article in Cognee.
-
-        Args:
-            article: Parsed article with ``title``, ``content``, ``source``,
-                     and ``link`` keys.
-
-        Returns:
-            Structured ingestion result from the Cognee remember pipeline.
-        """
+        """Store one parsed news article in Cognee."""
+        t0 = time.time()
         result = await remember_article(article)
+        duration_ms = (time.time() - t0) * 1000
 
-        # Phase 5: Auto-improvement hook — every N articles trigger improve()
+        # Phase 6: Lifecycle Tracking
+        LifecycleTracker.log(
+            event_type=EventType.INGESTION,
+            description=f"Ingested article: {article.get('title', 'Unknown')}",
+            duration_ms=duration_ms,
+            affected_memories=1,
+            affected_entities=[article.get('title', 'Unknown')],
+            status="success" if result.status == "success" else "failed",
+        )
+
+        # Phase 5: Auto-improvement hook
         self._increment_ingestion_count()
         if MemoryManager._ingestion_count >= self._IMPROVE_THRESHOLD:
             MemoryManager._ingestion_count = 0
@@ -172,14 +184,7 @@ class MemoryManager:
         self,
         articles: Iterable[Mapping[str, Any]],
     ) -> list[RememberArticleResult]:
-        """Store multiple parsed news articles in Cognee.
-
-        Args:
-            articles: Iterable of parsed article mappings.
-
-        Returns:
-            A result for each article, in input order.
-        """
+        """Store multiple parsed news articles in Cognee."""
         results: list[RememberArticleResult] = []
         for article in articles:
             results.append(await self.remember_article(article))
@@ -194,24 +199,11 @@ class MemoryManager:
         question: str,
         *,
         recall_limit: int = _DEFAULT_RECALL_LIMIT,
+        debug: bool = False,
     ) -> AskResult:
-        """Answer a question using only memories retrieved from Cognee.
-
-        Orchestration flow:
-            1. ``recall_memories(question)``     → list[MemoryItem]
-            2. ``build_context_prompt(…)``       → prompt string
-            3. ``LLMClient.get_completion(…)``   → answer string
-            4. Build and return :class:`AskResult`.
-
-        Args:
-            question:     The user's natural-language question.
-            recall_limit: How many memories to request from Cognee.
-
-        Returns:
-            :class:`AskResult` with ``answer``, ``sources``,
-            ``memories_used``, and ``memory_trace``.
-        """
+        """Answer a question using only memories retrieved from Cognee."""
         logger.info("MemoryManager.ask() — question: %.100r", question)
+        t0 = time.time()
 
         # Step 1 — Retrieve memories from Cognee
         memories: list[MemoryItem] = []
@@ -219,23 +211,16 @@ class MemoryManager:
 
         try:
             memories = await recall_memories(question, limit=recall_limit)
-        except RecallUnavailableError as exc:
-            logger.error("Cognee recall unavailable: %s", exc)
-            retrieval_error = str(exc)
-        except RecallExecutionError as exc:
-            logger.error("Cognee recall execution error: %s", exc)
+        except (RecallUnavailableError, RecallExecutionError) as exc:
+            logger.error("Cognee recall error: %s", exc)
             retrieval_error = str(exc)
         except Exception as exc:
             logger.exception("Unexpected error during Cognee recall.")
             retrieval_error = f"Unexpected retrieval error: {exc}"
 
-        logger.info(
-            "Recall complete — %d memories retrieved%s.",
-            len(memories),
-            f" (error: {retrieval_error})" if retrieval_error else "",
-        )
+        logger.info("Recall complete — %d memories retrieved.", len(memories))
 
-        # Step 2 — Build the context prompt (pure function, no I/O)
+        # Step 2 — Build the context prompt
         context_prompt = build_context_prompt(question, memories)
         system_prompt = get_system_prompt()
 
@@ -246,22 +231,39 @@ class MemoryManager:
         except Exception as exc:
             logger.exception("LLM completion failed during ask().")
             answer = f"LLM error — could not generate an answer: {exc}"
+            retrieval_error = retrieval_error or str(exc)
+
+        duration_ms = (time.time() - t0) * 1000
+
+        # Phase 6: Lifecycle Tracking
+        LifecycleTracker.log(
+            event_type=EventType.RECALL,
+            description=f"Recalled memories for query: '{question}'",
+            duration_ms=duration_ms,
+            affected_memories=len(memories),
+            status="failed" if retrieval_error and not answer.strip() else "success",
+            metadata={"query": question},
+        )
 
         # Step 4 — Build structured result
         sources = _build_sources(memories)
         memory_trace = _build_memory_trace(memories)
+        
+        debug_trace = None
+        if debug:
+            debug_trace = {
+                "original_question": question,
+                "context_prompt_sent_to_model": context_prompt,
+                "system_prompt_sent_to_model": system_prompt,
+                "raw_retrieved_memories_count": len(memories),
+            }
 
         result = AskResult(
             answer=answer,
             sources=sources,
             memories_used=len(memories),
             memory_trace=memory_trace,
-        )
-
-        logger.info(
-            "ask() complete — memories_used=%d, answer_len=%d.",
-            result.memories_used,
-            len(result.answer),
+            debug_trace=debug_trace,
         )
 
         return result
@@ -272,8 +274,20 @@ class MemoryManager:
 
     async def improve_memory(self, dataset: str = "news") -> ImprovementReport:
         """Trigger an enrichment cycle via improve()/memify()."""
+        t0 = time.time()
         service = ImprovementService()
-        return await service.run_improvement(dataset=dataset)
+        report = await service.run_improvement(dataset=dataset)
+        duration_ms = (time.time() - t0) * 1000
+        
+        # Log to Tracker
+        LifecycleTracker.log(
+            event_type=EventType.IMPROVEMENT,
+            description=f"Improvement cycle on dataset '{dataset}'",
+            duration_ms=duration_ms,
+            affected_memories=report.new_relationships + report.strengthened_relationships,
+            status=report.status,
+        )
+        return report
 
     async def get_memory_health(self) -> MemoryHealthReport:
         """Analyze current graph state and return health metrics."""
@@ -289,3 +303,22 @@ class MemoryManager:
         """Retrieve past improvement logs."""
         service = ImprovementService()
         return await service.get_history()
+
+    # ------------------------------------------------------------------
+    # Forget (Phase 6)
+    # ------------------------------------------------------------------
+
+    async def forget_memory(self, entity_id: str) -> bool:
+        """Purges a memory/entity completely from the system."""
+        t0 = time.time()
+        success = await purge_node_memory(entity_id)
+        duration_ms = (time.time() - t0) * 1000
+        
+        LifecycleTracker.log(
+            event_type=EventType.FORGET,
+            description=f"Forgot entity: '{entity_id}'",
+            duration_ms=duration_ms,
+            affected_entities=[entity_id],
+            status="success" if success else "failed",
+        )
+        return success

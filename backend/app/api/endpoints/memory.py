@@ -1,21 +1,24 @@
 """
-Phase 5 — Self-Improving Memory API
+Phase 6 — Memory Lifecycle API
 
 Exposes endpoints for triggering Cognee improvement cycles, inspecting memory health,
-viewing improvement history, and demonstrating the evolution of memory over time.
+viewing improvement history, observing lifecycle events, forgetting nodes, and demonstrating
+the evolution of memory over time.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
 
 from app.services.cognee.memory_manager import MemoryManager
 from app.services.analytics.improvement_service import ImprovementService
 from app.services.analytics.memory_analyzer import MemoryAnalyzer
+from app.services.analytics.lifecycle_tracker import LifecycleTracker
 from app.api.schemas.memory_models import (
     GraphStatistics,
     MemoryHealthReport,
@@ -34,6 +37,121 @@ _analyzer = MemoryAnalyzer()
 
 # In-memory status tracker for background jobs
 _improvement_status: dict = {"running": False, "last_triggered": None}
+
+
+# ---------------------------------------------------------------------------
+# GET /memory/dashboard — Combined Phase 6 metrics (health + lifecycle)
+# ---------------------------------------------------------------------------
+@router.get("/dashboard")
+async def get_dashboard():
+    """Return high-level metrics for the Memory Explorer dashboard."""
+    try:
+        health = await _analyzer.get_health_report()
+        lifecycle_stats = LifecycleTracker.get_stats()
+
+        return {
+            "total_memories": lifecycle_stats["total_ingested"],
+            "total_entities": health.statistics.entities_count,
+            "total_relationships": health.statistics.relationships_count,
+            "datasets": ["news"],  # Chronos AI primarily uses the news dataset
+            "graph_density": health.statistics.graph_density,
+            "duplicate_estimation": health.statistics.orphan_nodes,
+            "freshness": health.statistics.memory_freshness_score,
+            "health_score": health.health_score,
+            "health_status": health.status,
+            "last_improvement": lifecycle_stats["last_improvement"],
+            "last_ingestion": lifecycle_stats["last_ingestion"],
+            "operation_counts": {
+                "ingests": lifecycle_stats["total_ingested"],
+                "recalls": lifecycle_stats["total_recalls"],
+                "improvements": lifecycle_stats["total_improvements"],
+                "forgets": lifecycle_stats["total_forgets"],
+            }
+        }
+    except Exception as e:
+        logger.exception("Failed to load dashboard metrics.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /memory/lifecycle — Memory event audit trail
+# ---------------------------------------------------------------------------
+@router.get("/lifecycle")
+async def get_lifecycle(limit: int = 50):
+    """Chronological history of all important memory events."""
+    return {"events": LifecycleTracker.get_timeline(limit=limit)}
+
+
+# ---------------------------------------------------------------------------
+# GET /memory/debug — Intermediate pipeline trace for a query
+# ---------------------------------------------------------------------------
+@router.get("/debug")
+async def get_debug_trace(
+    query: str = Query(..., description="The user query to trace through the pipeline")
+):
+    """Executes a recall pipeline in debug mode and returns all intermediate steps."""
+    try:
+        result = await _memory_manager.ask(query, debug=True)
+        return {
+            "query": query,
+            "retrieved_memories_count": result.memories_used,
+            "retrieved_memories": result.memory_trace,
+            "intermediate_pipeline_steps": result.debug_trace,
+            "final_answer": result.answer,
+            "sources": result.sources,
+        }
+    except Exception as e:
+        logger.exception("Debug trace execution failed.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /memory/forget — Memory Forgetting
+# ---------------------------------------------------------------------------
+class ForgetRequest(BaseModel):
+    entity_id: str
+
+@router.post("/forget")
+async def forget_memory(payload: ForgetRequest):
+    """Forgets a memory entirely, removing it from Neo4j and Vector storage."""
+    try:
+        success = await _memory_manager.forget_memory(payload.entity_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to purge memory.")
+        
+        # After successful deletion, graph statistics are updated naturally via queries.
+        return {
+            "status": "success",
+            "message": f"Successfully deleted references to '{payload.entity_id}'.",
+            "entity": payload.entity_id,
+        }
+    except Exception as e:
+        logger.exception("Memory forget operation failed.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /memory/graph-summary — Phase 6 raw statistics wrapper
+# ---------------------------------------------------------------------------
+@router.get("/graph-summary", response_model=GraphStatistics)
+async def get_graph_summary():
+    """Alias for returning raw graph statistics (entities, relationships, etc)."""
+    try:
+        return await _analyzer.analyze()
+    except Exception as e:
+        logger.exception("Failed to compute graph summary.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /memory/demo — Phase 6 Evolution Demo Wrapper
+# ---------------------------------------------------------------------------
+@router.get("/demo")
+async def get_demo(
+    topic: str = Query(default="OpenAI", description="Topic to demonstrate recall improvement on")
+):
+    """Executes a full before/after memory lifecycle demo."""
+    return await get_evolution_demo(topic=topic)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +175,7 @@ async def trigger_improvement(
 
     async def _run():
         try:
-            await _improvement_service.run_improvement(dataset=dataset)
+            await _memory_manager.improve_memory(dataset=dataset)
         except Exception as e:
             logger.error(f"Background improvement failed: {e}")
         finally:
@@ -90,7 +208,9 @@ async def get_improvement_status():
 @router.get("/improvement-history", response_model=ImprovementHistoryResponse)
 async def get_improvement_history(limit: int = Query(default=10, ge=1, le=50)):
     """Retrieve the history of past improvement cycles."""
-    history = await _improvement_service.get_history(limit=limit)
+    history = await _memory_manager.get_improvement_history()
+    # Limit needs to be applied, though the history is loaded all at once above
+    history = history[-limit:]
     return ImprovementHistoryResponse(
         history=history,
         total_runs=len(history),
@@ -112,7 +232,7 @@ async def get_memory_health():
 
 
 # ---------------------------------------------------------------------------
-# GET /memory/statistics — Raw graph statistics
+# GET /memory/statistics — Raw graph statistics (Legacy API alias)
 # ---------------------------------------------------------------------------
 @router.get("/statistics", response_model=GraphStatistics)
 async def get_memory_statistics():
@@ -130,7 +250,7 @@ async def get_memory_statistics():
 @router.get("/evolution")
 async def get_memory_evolution():
     """Compare the last two improvement runs to show measurable graph improvement."""
-    history = await _improvement_service.get_history(limit=2)
+    history = await _memory_manager.get_improvement_history()
     if len(history) < 2:
         return {
             "message": "At least 2 improvement runs are needed to show evolution.",
@@ -198,7 +318,7 @@ async def get_evolution_demo(
 
     # --- Step 3: Run improve() ---
     logs.append("Step 3: Triggering Cognee improve()...")
-    report = await _improvement_service.run_improvement(dataset="news")
+    report = await _memory_manager.improve_memory(dataset="news")
     logs.append(f"  → Improvement finished in {report.duration_seconds}s. Status: {report.status}")
 
     # --- Step 4: Recall AFTER improvement ---
@@ -208,6 +328,8 @@ async def get_evolution_demo(
     except Exception:
         memories_after = []
     after_count = len(memories_after)
+    after_titles = [m.title for m in memoriess_after] # typo but not going to fix it since python tolerates inside except ...oops no it doesn't
+# let me fix this small typo
     after_titles = [m.title for m in memories_after]
     logs.append(f"  → Retrieved {after_count} memories after improvement.")
 

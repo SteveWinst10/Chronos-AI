@@ -23,12 +23,22 @@ def test_api_key():
         return
     try:
         from openai import OpenAI
-        r = OpenAI(api_key=key).chat.completions.create(
-            model="gpt-3.5-turbo", messages=[{"role":"user","content":"hi"}], max_tokens=3
+        
+        is_groq = key.startswith("gsk_")
+        
+        if is_groq:
+            client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+            model = "llama-3.1-8b-instant"
+        else:
+            client = OpenAI(api_key=key)
+            model = "gpt-3.5-turbo"
+            
+        r = client.chat.completions.create(
+            model=model, messages=[{"role":"user","content":"hi"}], max_tokens=3
         )
-        check("OpenAI API call", True, r.choices[0].message.content)
+        check(f"{'Groq' if is_groq else 'OpenAI'} API call", True, r.choices[0].message.content)
     except Exception as e:
-        check("OpenAI API call", False, str(e)[:100])
+        check("API call", False, str(e)[:100])
 
 # ── PHASE 1: Imports ─────────────────────────────────────────────────────────
 def test_phase1():
@@ -133,6 +143,26 @@ def test_phase5():
     except Exception as e:
         check("MemoryManager Phase 5 methods", False, str(e)[:80])
 
+# ── PHASE 6: Memory Lifecycle Demonstration Layer ──────────────────────────────
+def test_phase6():
+    print("\n[PHASE 6 — Lifecycle & Observability]")
+    try:
+        from app.services.analytics.lifecycle_tracker import LifecycleTracker
+        check("lifecycle_tracker.py import", True)
+    except Exception as e:
+        check("lifecycle_tracker.py import", False, str(e)[:80])
+    try:
+        from app.services.analytics.system_health import SystemHealth
+        check("system_health.py import", True)
+    except Exception as e:
+        check("system_health.py import", False, str(e)[:80])
+    try:
+        from app.services.cognee.memory_manager import MemoryManager
+        mm = MemoryManager()
+        check("MemoryManager Phase 6 methods", hasattr(mm, "forget_memory"))
+    except Exception as e:
+        check("MemoryManager Phase 6 methods", False, str(e)[:80])
+
 # ── ROUTER ────────────────────────────────────────────────────────────────────
 def test_router():
     print("\n[API ROUTER]")
@@ -155,9 +185,11 @@ if __name__ == "__main__":
     test_phase3()
     test_phase4()
     test_phase5()
+    test_phase6()
     test_router()
 
     passed = sum(1 for r in RESULTS if r[0] == "PASS")
+
     failed = sum(1 for r in RESULTS if r[0] == "FAIL")
     print(f"\n{'='*60}")
     print(f" Summary: {passed} passed, {failed} failed out of {len(RESULTS)} checks")
