@@ -1,18 +1,9 @@
 import uvicorn
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from api.router import api_router
 
-from app.api.router import api_router
-from app.core.config import settings
-from app.core.logging import configure_logging
-
-configure_logging()
-
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.VERSION,
-    # Optionally add docs URL prefixes if needed
-)
+# Initialize the FastAPI app
+app = FastAPI(title="News AI Backend")
 
 # CORS configuration to allow React dev server access
 app.add_middleware(
@@ -42,4 +33,5 @@ async def on_shutdown():
     pass
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    import uvicorn
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

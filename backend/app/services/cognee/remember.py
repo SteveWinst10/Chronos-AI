@@ -1,112 +1,236 @@
+"""Article ingestion helpers for Cognee memory.
+
+This module starts after the news pipeline has already fetched and parsed an
+article. It validates the article, formats it as a stable memory document, and
+stores it in Cognee's permanent `news` dataset.
+"""
+
+from __future__ import annotations
+
+import inspect
 import logging
-import json
-import re
-import uuid
-from app.services.llm.llm_client import LLMClient
-from app.services.llm.prompts import KNOWLEDGE_EXTRACTION_PROMPT
-from app.services.cognee.ontologies import validate_triple
-from app.storage.neo4j_graph import neo4j_graph
-from app.storage.vector_db import upsert_vector
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any, Mapping, TypedDict
 
 logger = logging.getLogger(__name__)
 
-
-def parse_json_triples(text: str) -> list[dict]:
-    """Parse JSON triples list from LLM output robustly, handling markdown wrappers."""
-    cleaned = text.strip()
-    # Strip markdown block formatting if present
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-zA-Z0-9]*\n", "", cleaned)
-        cleaned = re.sub(r"\n```$", "", cleaned)
-        cleaned = cleaned.strip()
-        
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return data
-    except Exception:
-        # Attempt to find array brackets in case of conversational prefixes
-        match = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-                if isinstance(data, list):
-                    return data
-            except Exception:
-                pass
-    logger.warning(f"Failed to parse LLM triples response: {text}")
-    return []
+NEWS_DATASET = "news"
+REQUIRED_ARTICLE_FIELDS = ("title", "content", "source", "link")
 
 
-async def remember_context(raw_text: str, conversation_id: str) -> None:
+class ArticleValidationError(ValueError):
+    """Raised when an incoming article is missing required usable data."""
+
+
+class ArticleStorageError(RuntimeError):
+    """Raised when Cognee cannot store a validated article document."""
+
+
+class RememberArticleResult(TypedDict, total=False):
+    """Structured result returned by article memory ingestion."""
+
+    success: bool
+    message: str
+    source: str
+    title: str
+    timestamp: str
+    dataset: str
+    error: str
+
+
+@dataclass(frozen=True)
+class MemoryDocument:
+    """Formatted article document plus metadata used for ingestion."""
+
+    text: str
+    title: str
+    source: str
+    link: str
+    ingested_at: str
+    dataset: str = NEWS_DATASET
+
+
+def validate_article(article: Mapping[str, Any]) -> None:
+    """Validate that an article contains the required non-empty fields.
+
+    Args:
+        article: Parsed article mapping from the existing news pipeline.
+
+    Raises:
+        ArticleValidationError: If the article is not a mapping, is missing
+            required fields, or contains blank values.
     """
-    Ingests unstructured text into the long-term memory network.
-    
-    1. Calls LLM with KNOWLEDGE_EXTRACTION_PROMPT to extract triples.
-    2. Validates extracted triples against ontologies.py and saves valid ones to Neo4j.
-    3. Generates vector embeddings for the raw text and saves them to LanceDB.
+
+    if not isinstance(article, Mapping):
+        raise ArticleValidationError("Article must be a mapping/dictionary.")
+
+    missing_fields = [field for field in REQUIRED_ARTICLE_FIELDS if field not in article]
+    if missing_fields:
+        missing = ", ".join(missing_fields)
+        raise ArticleValidationError(f"Article is missing required field(s): {missing}.")
+
+    empty_fields = [
+        field
+        for field in REQUIRED_ARTICLE_FIELDS
+        if not str(article.get(field, "")).strip()
+    ]
+    if empty_fields:
+        empty = ", ".join(empty_fields)
+        raise ArticleValidationError(f"Article field(s) cannot be empty: {empty}.")
+
+
+def build_memory_document(article: Mapping[str, Any]) -> MemoryDocument:
+    """Build a structured Cognee memory document from a validated article.
+
+    Args:
+        article: Parsed and validated article mapping.
+
+    Returns:
+        A formatted memory document and internal metadata.
     """
-    llm = LLMClient()
 
-    # Step 1: Call LLM to parse text into standard entity triples
-    prompt = f"Unstructured Text to Extract:\n\n{raw_text}"
-    llm_output = await llm.get_completion(prompt, KNOWLEDGE_EXTRACTION_PROMPT)
-    triples = parse_json_triples(llm_output)
+    title = str(article["title"]).strip()
+    source = str(article["source"]).strip()
+    link = str(article["link"]).strip()
+    content = str(article["content"]).strip()
+    ingested_at = datetime.now(UTC).isoformat()
 
-    # Step 2: Validate the output and upsert to Neo4j
-    valid_triple_count = 0
-    for triple in triples:
-        source = triple.get("source")
-        source_label = triple.get("source_label")
-        relation = triple.get("relation")
-        target = triple.get("target")
-        target_label = triple.get("target_label")
+    document = (
+        "Title:\n"
+        f"{title}\n\n"
+        "Source:\n"
+        f"{source}\n\n"
+        "Link:\n"
+        f"{link}\n\n"
+        "Content:\n"
+        f"{content}\n"
+    )
 
-        if not all([source, source_label, relation, target, target_label]):
-            continue
+    return MemoryDocument(
+        text=document,
+        title=title,
+        source=source,
+        link=link,
+        ingested_at=ingested_at,
+    )
 
-        if validate_triple(source_label, relation, target_label):
-            # Upsert nodes and edge in Neo4j
-            neo4j_graph.upsert_node(
-                name=source, 
-                label=source_label.upper(), 
-                properties={"conversation_id": conversation_id}
-            )
-            neo4j_graph.upsert_node(
-                name=target, 
-                label=target_label.upper(), 
-                properties={"conversation_id": conversation_id}
-            )
-            neo4j_graph.upsert_edge(
-                source_name=source, 
-                target_name=target, 
-                relation=relation.upper(), 
-                properties={"conversation_id": conversation_id}
-            )
-            valid_triple_count += 1
-        else:
-            logger.warning(
-                f"Skipping invalid triple topology: "
-                f"({source_label}:{source}) -[{relation}]-> ({target_label}:{target})"
-            )
 
-    logger.info(f"Retained {valid_triple_count} of {len(triples)} extracted triples in Neo4j Graph.")
+async def store_article(memory_document: MemoryDocument) -> Any:
+    """Store a formatted article document in Cognee.
 
-    # Step 3: Calculate dense embedding for the text block and upsert to LanceDB
+    The installed Cognee SDK exposes `async cognee.remember(data,
+    dataset_name=..., session_id=None, ...)`. Omitting `session_id` stores
+    permanent graph memory.
+
+    Args:
+        memory_document: Structured article document to store.
+
+    Returns:
+        The raw Cognee SDK result.
+
+    Raises:
+        ArticleStorageError: If Cognee is unavailable or rejects the document.
+    """
+
     try:
-        embedding = await llm.get_embedding(raw_text)
-        vector_id = str(uuid.uuid4())
-        metadata_str = json.dumps({
-            "raw_text": raw_text,
-            "conversation_id": conversation_id
-        })
-        upsert_vector(
-            collection_name="memories", 
-            id=vector_id, 
-            vector=embedding, 
-            metadata=metadata_str
+        import cognee
+    except ImportError as exc:
+        raise ArticleStorageError("Cognee SDK is not installed.") from exc
+
+    remember = getattr(cognee, "remember", None)
+    if remember is None:
+        raise ArticleStorageError("Cognee SDK does not expose a remember() API.")
+
+    try:
+        result = remember(
+            memory_document.text,
+            dataset_name=memory_document.dataset,
+            run_in_background=False,
         )
-        logger.info(f"Successfully upserted text embedding to vector DB (ID: {vector_id}).")
-    except Exception as e:
-        logger.error(f"Failed to upsert text embedding to vector DB: {e}")
-        raise e
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    except Exception as exc:
+        logger.exception(
+            "Cognee failed to store article.",
+            extra={
+                "title": memory_document.title,
+                "source": memory_document.source,
+                "dataset": memory_document.dataset,
+            },
+        )
+        raise ArticleStorageError(f"Cognee failed to store article: {exc}") from exc
+
+
+def _success_result(memory_document: MemoryDocument) -> RememberArticleResult:
+    return {
+        "success": True,
+        "message": "Article stored successfully",
+        "source": memory_document.source,
+        "title": memory_document.title,
+        "timestamp": memory_document.ingested_at,
+        "dataset": memory_document.dataset,
+    }
+
+
+def _failure_result(
+    message: str,
+    *,
+    article: Mapping[str, Any] | None = None,
+    timestamp: str | None = None,
+) -> RememberArticleResult:
+    safe_article = article if isinstance(article, Mapping) else {}
+    return {
+        "success": False,
+        "message": message,
+        "source": str(safe_article.get("source", "")).strip(),
+        "title": str(safe_article.get("title", "")).strip(),
+        "timestamp": timestamp or datetime.now(UTC).isoformat(),
+        "dataset": NEWS_DATASET,
+        "error": message,
+    }
+
+
+async def remember_article(article: Mapping[str, Any]) -> RememberArticleResult:
+    """Validate, transform, and store one parsed news article in Cognee.
+
+    Args:
+        article: Parsed article with `title`, `content`, `source`, and `link`.
+
+    Returns:
+        A structured success or failure result for the ingestion attempt.
+    """
+
+    memory_document: MemoryDocument | None = None
+
+    try:
+        validate_article(article)
+        memory_document = build_memory_document(article)
+        await store_article(memory_document)
+        logger.info(
+            "Article stored in Cognee.",
+            extra={
+                "title": memory_document.title,
+                "source": memory_document.source,
+                "dataset": memory_document.dataset,
+            },
+        )
+        return _success_result(memory_document)
+    except ArticleValidationError as exc:
+        logger.warning("Article validation failed: %s", exc)
+        return _failure_result(str(exc), article=article)
+    except ArticleStorageError as exc:
+        logger.error("Article storage failed: %s", exc)
+        return _failure_result(
+            str(exc),
+            article=article,
+            timestamp=memory_document.ingested_at if memory_document else None,
+        )
+    except Exception as exc:
+        logger.exception("Unexpected article ingestion failure.")
+        return _failure_result(
+            f"Unexpected article ingestion failure: {exc}",
+            article=article,
+            timestamp=memory_document.ingested_at if memory_document else None,
+        )

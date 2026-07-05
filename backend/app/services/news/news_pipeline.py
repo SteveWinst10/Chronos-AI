@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
-API_KEY = os.getenv("NEWS_API_KEY")
+API_KEY = os.getenv("NEWS_API_KEY") or os.getenv("NEWS_API_KEYS")
 
 def fetch_raw_news(category="technology"):
     """STEP 1: Fetches the raw JSON data from NewsAPI"""

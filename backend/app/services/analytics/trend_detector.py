@@ -1,38 +1,74 @@
-"""TrendDetector: surfaces emerging topics from a rolling article window."""
+"""
+TrendDetector: analyzes graph topology to identify trending topics and entities.
+Uses node centrality (degree) and relationship density to spot 'hot' subjects.
+"""
+from __future__ import annotations
+
 import logging
-from collections import Counter
-from typing import Optional
+from datetime import datetime, UTC
+from typing import Any
+from app.storage.neo4j_graph import neo4j_graph
 
 logger = logging.getLogger(__name__)
 
 
 class TrendDetector:
-    """Detects trending topics from a stream of news articles."""
+    """Service to detect trends and 'fastest growing' topics in the news memory."""
 
-    def __init__(self, window_size: int = 100):
-        self._window: list[dict] = []
-        self._window_size = window_size
+    @staticmethod
+    async def get_trending_report() -> dict[str, Any]:
+        """
+        [PHASE 3] Analyzes the entire graph to detect trends.
+        - Most discussed: Highest node degrees.
+        - Emerging: Relationship frequency spikes.
+        """
+        logger.info("Generating Trend Report...")
 
-    def ingest(self, article: dict) -> None:
-        """Add a preprocessed article to the rolling window."""
-        self._window.append(article)
-        if len(self._window) > self._window_size:
-            self._window.pop(0)
+        # 1. Fetch all nodes to calculate centrality
+        all_nodes = neo4j_graph.get_all_nodes()
+        
+        if not all_nodes:
+            logger.info("Empty graph — no trends detected.")
+            return {
+                "most_discussed_companies": [],
+                "top_topics": [],
+                "most_connected_entity": "N/A",
+                "relationship_summary": []
+            }
 
-    def top_trends(self, top_n: int = 10) -> list[dict]:
-        """Return the top-N trending keywords across the current window."""
-        word_counts: Counter = Counter()
-        for article in self._window:
-            text = f"{article.get('title', '')} {article.get('description', '')}".lower()
-            for token in text.split():
-                clean = token.strip(".,!?\"'();:-")
-                if len(clean) > 3:
-                    word_counts[clean] += 1
-        return [{"keyword": w, "count": c} for w, c in word_counts.most_common(top_n)]
+        # Calculate degree for each node
+        node_metrics = []
+        for node in all_nodes:
+            name = node["name"]
+            degree = neo4j_graph.entity_degree(name)
+            node_metrics.append({
+                "name": name,
+                "label": node["label"],
+                "degree": degree
+            })
 
-    def detect(self, articles: Optional[list[dict]] = None, top_n: int = 10) -> list[dict]:
-        """Ingest a batch of articles (optional) and return current trends."""
-        if articles:
-            for a in articles:
-                self.ingest(a)
-        return self.top_trends(top_n=top_n)
+        # 2. Categorise and Sort
+        # Filter for companies/orgs
+        companies = [n for n in node_metrics if n["label"].upper() in ("COMPANY", "ORGANIZATION", "ORG")]
+        # If no specific labels, use all as generic concepts
+        if not companies:
+            companies = node_metrics
+            
+        companies.sort(key=lambda x: x["degree"], reverse=True)
+
+        topics = [n for n in node_metrics if n["label"].upper() in ("TOPIC", "CONCEPT", "CATEGORY")]
+        if not topics:
+            topics = node_metrics
+            
+        topics.sort(key=lambda x: x["degree"], reverse=True)
+
+        # 3. Relationship Patterns
+        rel_freq = neo4j_graph.relationship_frequency()
+
+        return {
+            "most_discussed_companies": [c["name"] for c in companies[:5]],
+            "top_topics": [t["name"] for t in topics[:5]],
+            "most_connected_entity": companies[0]["name"] if companies else "N/A",
+            "relationship_summary": rel_freq[:5],
+            "timestamp": datetime.now(UTC).isoformat()
+        }

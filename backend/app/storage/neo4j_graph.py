@@ -117,6 +117,55 @@ class MockGraphStore:
         if node_name_b in self.nodes:
             del self.nodes[node_name_b]
 
+    def get_entity(self, name: str) -> dict:
+        node = self.nodes.get(name)
+        if not node:
+            return None
+        return {"name": name, "label": node["label"], "properties": node["properties"]}
+
+    def shortest_path(self, source_name: str, target_name: str) -> list:
+        # Simple BFS for mock
+        if source_name not in self.nodes or target_name not in self.nodes:
+            return []
+        
+        queue = [[source_name]]
+        visited = {source_name}
+        
+        while queue:
+            path = queue.pop(0)
+            node = path[-1]
+            
+            if node == target_name:
+                return path
+            
+            for edge in self.edges:
+                neighbor = None
+                if edge["source"] == node:
+                    neighbor = edge["target"]
+                elif edge["target"] == node:
+                    neighbor = edge["source"]
+                
+                if neighbor and neighbor not in visited:
+                    visited.add(neighbor)
+                    new_path = list(path)
+                    new_path.append(neighbor)
+                    queue.append(new_path)
+        return []
+
+    def entity_degree(self, name: str) -> int:
+        degree = 0
+        for edge in self.edges:
+            if edge["source"] == name or edge["target"] == name:
+                degree += 1
+        return degree
+
+    def relationship_frequency(self) -> list[dict]:
+        freq = {}
+        for edge in self.edges:
+            rel = edge["type"]
+            freq[rel] = freq.get(rel, 0) + 1
+        return [{"type": t, "count": c} for t, c in freq.items()]
+
 
 class Neo4jGraphStore:
     def __init__(self):
@@ -194,6 +243,7 @@ class Neo4jGraphStore:
         if self.use_mock:
             return self.mock_store.get_neighborhood(node_name)
             
+        start_time = time.time()
         query = """
         MATCH (n {name: $node_name})-[r]-(m)
         RETURN n, r, m, type(r) as edge_type, labels(n) as source_labels, labels(m) as target_labels
@@ -218,6 +268,13 @@ class Neo4jGraphStore:
                         "target_label": tgt_labels[0] if tgt_labels else "CONCEPT",
                         "properties": dict(r)
                     })
+                
+                exec_time = (time.time() - start_time) * 1000
+                logger.info(
+                    "GraphQuery: get_neighbors(name=%s) — Depth: 1 — Nodes: %d — Edges: %d — Duration: %.2fms",
+                    node_name, len(neighbors), len(neighbors), exec_time
+                )
+                
                 return neighbors
         except Exception as e:
             logger.error(f"Neo4j get_neighborhood failed: {e}. Reading from mock backup store.")
@@ -352,6 +409,119 @@ class Neo4jGraphStore:
         except Exception as e:
             logger.error(f"Neo4j merge_nodes failed: {e}. Falling back to mock store merge.")
             self.mock_store.merge_nodes(node_name_a, node_name_b, label)
+
+    def get_entity(self, name: str) -> dict:
+        """Fetch a single node by name, following Cognee-style label matching."""
+        if self.use_mock:
+            return self.mock_store.get_entity(name)
+        
+        start_time = time.time()
+        # Cognee often uses specific labels, but we'll try a generic name match first
+        query = "MATCH (n {name: $name}) RETURN n, labels(n) as labels LIMIT 1"
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, name=name)
+                record = result.single()
+                
+                exec_time = (time.time() - start_time) * 1000
+                logger.info(
+                    "GraphQuery: get_entity(name=%s) — Nodes: %d — Duration: %.2fms",
+                    name, 1 if record else 0, exec_time
+                )
+
+                if not record:
+                    return None
+                node = record["n"]
+                labels = record["labels"]
+                return {
+                    "name": node.get("name"),
+                    "label": labels[0] if labels else "CONCEPT",
+                    "properties": dict(node)
+                }
+        except Exception as e:
+            logger.exception("Neo4j get_entity failed: %s", e)
+            return self.mock_store.get_entity(name)
+
+    def get_neighbors(self, node_name: str) -> list[dict]:
+        """Alias for get_neighborhood to match Phase 3 spec."""
+        return self.get_neighborhood(node_name)
+
+    def shortest_path(self, source_name: str, target_name: str, max_depth: int = 5) -> list[str]:
+        """Find the shortest path between two entities by name."""
+        if self.use_mock:
+            return self.mock_store.shortest_path(source_name, target_name)
+        
+        query = """
+        MATCH (s {name: $source_name}), (t {name: $target_name})
+        MATCH p = shortestPath((s)-[*]-(t))
+        WHERE length(p) <= $max_depth
+        RETURN [n in nodes(p) | n.name] as node_names
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, source_name=source_name, target_name=target_name, max_depth=max_depth)
+                record = result.single()
+                return record["node_names"] if record else []
+        except Exception as e:
+            logger.exception("Neo4j shortest_path failed: %s", e)
+            return self.mock_store.shortest_path(source_name, target_name)
+
+    def related_entities(self, node_name: str, min_strength: float = 0.0) -> list[dict]:
+        """Fetch entities related to the given node, optionally filtered by strength."""
+        if self.use_mock:
+            # Basic fallback: return all immediate neighbors
+            return self.get_neighborhood(node_name)
+        
+        query = """
+        MATCH (n {name: $node_name})-[r]-(m)
+        WHERE r.strength >= $min_strength OR r.strength IS NULL
+        RETURN m.name as name, type(r) as relationship, r.strength as strength, labels(m) as labels
+        ORDER BY r.strength DESC
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, node_name=node_name, min_strength=min_strength)
+                return [
+                    {
+                        "name": record["name"],
+                        "relationship": record["relationship"],
+                        "strength": record["strength"] or 0.0,
+                        "label": record["labels"][0] if record["labels"] else "CONCEPT"
+                    }
+                    for record in result
+                ]
+        except Exception as e:
+            logger.exception("Neo4j related_entities failed: %s", e)
+            return self.mock_store.get_neighborhood(node_name)
+
+    def entity_degree(self, name: str) -> int:
+        """Fetch the number of connections for an entity (centrality measure)."""
+        if self.use_mock:
+            return self.mock_store.entity_degree(name)
+        
+        query = "MATCH (n {name: $name}) RETURN count{ (n)--() } as degree"
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, name=name)
+                record = result.single()
+                return record["degree"] if record else 0
+        except Exception as e:
+            logger.exception("Neo4j entity_degree failed: %s", e)
+            return self.mock_store.entity_degree(name)
+
+    def relationship_frequency(self) -> list[dict]:
+        """Count occurrences of each relationship type in the graph."""
+        if self.use_mock:
+            return self.mock_store.relationship_frequency()
+        
+        query = "MATCH ()-[r]->() RETURN type(r) as type, count(r) as count ORDER BY count DESC"
+        try:
+            with self.driver.session() as session:
+                result = session.run(query)
+                return [{"type": r["type"], "count": r["count"]} for r in result]
+        except Exception as e:
+            logger.exception("Neo4j relationship_frequency failed: %s", e)
+            return self.mock_store.relationship_frequency()
 
 
 # Create single global instance
