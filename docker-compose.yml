@@ -16,7 +16,7 @@ services:
       NEWS_API_KEY: ${NEWS_API_KEY:-}
     volumes:
       - ./backend:/backend
-- ./memories.lance:/data/memories.lance
+      - ./memories.lance:/data/memories.lance
     networks:
       - knowledge-network
 

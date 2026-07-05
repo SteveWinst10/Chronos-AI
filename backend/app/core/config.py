@@ -2,8 +2,6 @@ from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import uvicorn
-from app.storage.vector_db import init_vector_db
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
