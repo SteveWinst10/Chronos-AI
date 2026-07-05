@@ -1,6 +1,8 @@
 import uvicorn
-from fastapi import FastAPI
-from api.router import api_router
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.router import api_router
+
+from app.core.config import settings
 
 # Initialize the FastAPI app
 app = FastAPI(title="News AI Backend")
