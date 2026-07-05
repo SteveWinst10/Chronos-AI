@@ -1,69 +1,54 @@
 """
 TimelineBuilder: constructs chronological event sequences for entities or topics.
-Connects graph entities back to their source articles stored in Cognee.
+Refactored for Phase 4 to use Event Intelligence (Clustering + Scoring).
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, UTC
 from typing import Any
 
-from app.services.cognee.recall import recall_memories, MemoryItem
+from app.services.analytics.event_clustering import EventClustering
+from app.services.analytics.importance_scorer import ImportanceScorer
+from app.services.cognee.recall import recall_memories
 
 logger = logging.getLogger(__name__)
 
 
 class TimelineBuilder:
-    """Service to generate chronological timelines for news topics."""
+    """Service to generate chronological timelines for news topics using Event Intelligence."""
 
     @staticmethod
-    async def build_timeline(topic: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def build_timeline(topic: str, limit: int = 20) -> list[dict[str, Any]]:
         """
-        [PHASE 3] Creates a chronological timeline for a given topic/entity.
-        Workflow:
-        1. Recall memories (articles) from Cognee related to the topic.
-        2. Parse temporal metadata from memories.
-        3. Sort by date and format as timeline events.
+        [PHASE 4] Creates a chronological timeline using clustered events.
         """
-        logger.info(f"Building timeline for: {topic}")
+        logger.info(f"Building Phase 4 timeline for: {topic}")
         
-        # In a pure graph approach, we would query: (Entity)-[:MENTIONED_IN]-(Article)
-        # But for high accuracy during the hackathon, we combine recall with metadata sorting.
+        # 1. Recall memories
         memories = await recall_memories(topic, limit=limit)
-        
         if not memories:
-            logger.info(f"No memories found to build a timeline for {topic}.")
             return []
 
-        events = []
-        for memory in memories:
-            # Attempt to extract date from metadata if Cognee provided it, 
-            # otherwise use current time or a placeholder.
-            date_str = memory.metadata.get("ingested_at") or memory.metadata.get("date")
-            
-            # Simple date parsing logic
-            try:
-                if date_str:
-                    event_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                else:
-                    event_date = datetime.now()
-            except Exception:
-                event_date = datetime.now()
-
-            events.append({
-                "title": memory.title,
-                "date": event_date.strftime("%b %d, %Y"),
-                "iso_date": event_date.isoformat(),
-                "source": memory.source,
-                "link": memory.link,
-                "summary": memory.content[:300] + "..." if len(memory.content) > 300 else memory.content,
-                "relevance": memory.score
-            })
-
-        # Sort chronologically (oldest to newest) or newest first?
-        # Typically timelines are chronological (old to new), but news users often want new to old.
-        # We'll stick to chronological (ASC) for a 'story' feel.
-        events.sort(key=lambda x: x["iso_date"])
+        # 2. Cluster into events
+        events = EventClustering.cluster_memories(memories)
         
-        logger.info(f"Timeline built with {len(events)} events for {topic}.")
-        return events
+        # 3. Score events
+        scored_events = ImportanceScorer.score_events(events)
+        
+        # 4. Sort and Format
+        timeline = sorted(scored_events, key=lambda x: x.start_date)
+        
+        return [
+            {
+                "id": e.id,
+                "title": e.title,
+                "start_date": e.start_date,
+                "end_date": e.end_date,
+                "importance": e.importance,
+                "participating_entities": e.participating_entities,
+                "memory_count": len(e.memories),
+                "summary": e.description or (e.memories[0].title if e.memories else ""),
+                "sources": [m.dict() for m in e.memories]
+            }
+            for e in timeline
+        ]
