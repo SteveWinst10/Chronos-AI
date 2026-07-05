@@ -25,7 +25,9 @@ def root():
 @app.on_event("startup")
 async def on_startup():
     # Initialize resources, database connections, etc.
-    pass
+    # Ensure vector DB is initialized before handling requests
+    from app.storage.vector_db import init_vector_db
+    init_vector_db()
 
 @app.on_event("shutdown")
 async def on_shutdown():

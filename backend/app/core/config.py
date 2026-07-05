@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import uvicorn
+from app.storage.vector_db import init_vector_db
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "password"
-    VECTOR_DB_URL: str = "file:///backend/.data/vector"
+    VECTOR_DB_URL: str = "/home/steve/Projects/Chronos-AI/memories.lance"
     DATABASE_URL: str = "sqlite:///./chronos.db"
 
     OPENAI_API_KEY: Optional[str] = None

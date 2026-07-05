@@ -5,12 +5,22 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-
 from app.services.analytics.relationship_strength import RelationshipDiscovery
 from app.storage.neo4j_graph import neo4j_graph
 
 router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
 logger = logging.getLogger(__name__)
+
+@router.get("/")
+async def graph_snapshot():
+    """Returns actual Neo4j graph nodes and edges for visualization."""
+    nodes = neo4j_graph.get_all_nodes()
+    # Note: ensure get_all_edges exists or fall back
+    edges = getattr(neo4j_graph, "get_all_edges", lambda: [])()
+    return {
+        "nodes": nodes,
+        "edges": edges
+    }
 
 @router.get("/entity/{name}")
 async def get_entity_details(name: str):

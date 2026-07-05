@@ -7,3 +7,4 @@ httpx>=0.28.0,<1.0.0
 feedparser==6.0.11
 lancedb>=0.24.0,<1.0.0
 python-dotenv==1.0.1
+neo4j>=5.23.0,<6.0.0

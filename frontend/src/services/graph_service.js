@@ -17,4 +17,12 @@ export const graphService = {
     const response = await apiClient.delete(`/memory/${key}`);
     return response.data;
   },
+  fetchVectorMemories: async () => {
+    const response = await apiClient.get("/memory/vector");
+    return response.data;
+  },
+  purgeCogneeMemory: async (entityId) => {
+    const response = await apiClient.delete(`/memory/cognee/${entityId}`);
+    return response.data;
+  },
 };

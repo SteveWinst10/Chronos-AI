@@ -31,6 +31,14 @@ KNOWLEDGE_EXTRACTION_PROMPT = (
     "]"
 )
 
+CONTEXT_ENGINE_PROMPT = (
+    "You are Chronos-AI, a knowledge-augmented assistant. "
+    "You have access to retrieved context from a vector memory store and a knowledge graph. "
+    "Use the provided context to answer the user's query accurately. "
+    "If the context does not contain relevant information, rely on your own knowledge. "
+    "Format your response clearly and concisely."
+)
+
 CONTEXT_CONSOLIDATION_PROMPT = (
     "You are a graph optimizer and entity consolidator. Your task is to analyze a list "
     "of entities from a graph database and identify duplicate entities that refer "
