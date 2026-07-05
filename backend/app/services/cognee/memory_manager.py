@@ -13,8 +13,10 @@ Rules
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Iterable, Mapping
+
 
 from app.services.cognee.recall import (
     MemoryItem,
@@ -25,6 +27,11 @@ from app.services.cognee.recall import (
 from app.services.cognee.remember import RememberArticleResult, remember_article
 from app.services.llm.llm_client import LLMClient
 from app.services.retrieval.context_builder import build_context_prompt, get_system_prompt
+
+# Phase 5 Imports
+from app.services.analytics.improvement_service import ImprovementService
+from app.services.analytics.memory_analyzer import MemoryAnalyzer
+from app.api.schemas.memory_models import MemoryHealthReport, ImprovementReport, GraphStatistics
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +131,16 @@ def _build_memory_trace(memories: list[MemoryItem]) -> list[dict[str, Any]]:
 
 class MemoryManager:
     """Clean interface for all Cognee memory operations in the backend."""
+ 
+    _ingestion_count = 0
+    _IMPROVE_THRESHOLD = 25
+ 
+    @property
+    def ingestion_count(self) -> int:
+        return MemoryManager._ingestion_count
+ 
+    def _increment_ingestion_count(self):
+        MemoryManager._ingestion_count += 1
 
     # ------------------------------------------------------------------
     # Ingestion (Phase 1)
@@ -139,7 +156,17 @@ class MemoryManager:
         Returns:
             Structured ingestion result from the Cognee remember pipeline.
         """
-        return await remember_article(article)
+        result = await remember_article(article)
+
+        # Phase 5: Auto-improvement hook — every N articles trigger improve()
+        self._increment_ingestion_count()
+        if MemoryManager._ingestion_count >= self._IMPROVE_THRESHOLD:
+            MemoryManager._ingestion_count = 0
+            logger.info("Auto-improvement threshold reached — scheduling background improve().")
+            asyncio.create_task(self.improve_memory())
+
+        return result
+
 
     async def remember_articles(
         self,
@@ -238,3 +265,27 @@ class MemoryManager:
         )
 
         return result
+
+    # ------------------------------------------------------------------
+    # Self-Improvement (Phase 5)
+    # ------------------------------------------------------------------
+
+    async def improve_memory(self, dataset: str = "news") -> ImprovementReport:
+        """Trigger an enrichment cycle via improve()/memify()."""
+        service = ImprovementService()
+        return await service.run_improvement(dataset=dataset)
+
+    async def get_memory_health(self) -> MemoryHealthReport:
+        """Analyze current graph state and return health metrics."""
+        analyzer = MemoryAnalyzer()
+        return await analyzer.get_health_report()
+
+    async def get_memory_statistics(self) -> GraphStatistics:
+        """Retrieve raw graph statistics."""
+        analyzer = MemoryAnalyzer()
+        return await analyzer.analyze()
+
+    async def get_improvement_history(self) -> list[ImprovementReport]:
+        """Retrieve past improvement logs."""
+        service = ImprovementService()
+        return await service.get_history()
